@@ -10,6 +10,13 @@ const ExcelJS = require("exceljs");
 const queries = require("./connect_db/queries.js");
 const functions = require("./functions.js");
 
+// Import at the top of your backend file
+const {
+  sendWelcomeEmail,
+  sendAdminRegistrationEmail,
+} = require("./email/email.js");
+
+
 const JWT_SECRET = process.env.JWT_SECRET;
 
 module.exports = function () {
@@ -32,14 +39,13 @@ let common_fn = {
 
 const schema = "abg";
 
+
 async function registerUser(req, res) {
-  console.log("req", req);
   try {
     const tablename = schema + ".users";
-
     const { name, email, password } = req.data || {};
 
-    // Validation
+    // 1. Validation
     if (!name || !email || !password) {
       return libFunc.sendResponse(res, {
         status: 1,
@@ -47,16 +53,46 @@ async function registerUser(req, res) {
       });
     }
 
+    if (
+      typeof name !== "string" ||
+      typeof email !== "string" ||
+      typeof password !== "string"
+    ) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Invalid input",
+      });
+    }
+
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
 
+    if (!cleanName || !cleanEmail || !password) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Name, email and password are required",
+      });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(cleanEmail)) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Please enter a valid email address",
+      });
+    }
+
     const row_id = libFunc.randomid();
 
-    // Check email already exists
+    // 2. Check duplicate email
+    // Escape single quotes for SQL string values
+    const safeEmail = cleanEmail.replace(/'/g, "''");
+
     const checkEmail = await queries.custom_query(
       `SELECT id FROM ${tablename}
-       WHERE LOWER(email) = LOWER('${cleanEmail}')
-       LIMIT 1`,
+       WHERE LOWER(email) = LOWER('${safeEmail}')
+       LIMIT 1`
     );
 
     if (checkEmail && checkEmail.length > 0) {
@@ -66,25 +102,82 @@ async function registerUser(req, res) {
       });
     }
 
-    // Save password as plain text
+    // 3. Insert user
+    const safeName = cleanName.replace(/'/g, "''");
+    const safePassword = password.replace(/'/g, "''");
+
     const result = await queries.custom_query(
       `INSERT INTO ${tablename}
-       (row_id,name, email, password_hash, role)
-       VALUES ('${row_id}','${cleanName}', '${cleanEmail}', '${password}', 'USER')
-       RETURNING id,row_id, name, email, role, cr_on`,
+       (row_id, name, email, password_hash, role)
+       VALUES (
+         '${row_id}',
+         '${safeName}',
+         '${safeEmail}',
+         '${safePassword}',
+         'USER'
+       )
+       RETURNING id, row_id, name, email, role, cr_on`
     );
 
+    const savedUser = result && result[0];
+
+    if (!savedUser) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Unable to create user account",
+      });
+    }
+
+    // 4. Send both emails independently
+    // Email failure must not fail registration
+    try {
+      const emailTasks = [
+        {
+          label: "Welcome email",
+          task: () =>
+            sendWelcomeEmail(savedUser.name, savedUser.email),
+        },
+        {
+          label: "Admin notification",
+          task: () =>
+            sendAdminRegistrationEmail(
+              savedUser.name,
+              savedUser.email
+            ),
+        },
+      ];
+
+      await Promise.all(
+        emailTasks.map(async ({ label, task }) => {
+          try {
+            await task();
+            console.log(`${label} sent successfully`);
+          } catch (emailError) {
+            console.error(
+              `${label} failed:`,
+              emailError.message
+            );
+          }
+        })
+      );
+    } catch (emailError) {
+      // Extra protection: email issues won't fail registration
+      console.error("Email processing error:", emailError.message);
+    }
+
+    // 5. Registration success
     return libFunc.sendResponse(res, {
       status: 0,
       msg: "Registration successful",
-      data: result[0],
+      data: savedUser,
     });
+
   } catch (error) {
-    console.error("registerUser error:", error);
+    console.error("registerUser error:", error.message);
 
     return libFunc.sendResponse(res, {
       status: 1,
-      msg: "Registration failed",
+      msg: "Registration failed. Please try again.",
     });
   }
 }
