@@ -1,0 +1,138 @@
+CREATE SCHEMA IF NOT EXISTS abg;
+
+CREATE TABLE abg.users (
+ id SERIAL NOT NULL,
+ row_id TEXT NOT NULL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash TEXT NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'USER'
+        CHECK (role IN ('USER', 'ADMIN')),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+     cr_on timestamp without time zone DEFAULT now() NOT NULL,
+ up_on timestamp without time zone DEFAULT now() NOT NULL
+	);
+
+
+
+CREATE UNIQUE INDEX uq_abg_users_email
+ON abg.users (LOWER(email));
+
+
+
+
+CREATE TABLE abg.abg_reports (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    user_id BIGINT NOT NULL
+        REFERENCES abg.users(id)
+        ON DELETE RESTRICT,
+
+    report_name VARCHAR(150),
+
+    ph NUMERIC(5,3) NOT NULL
+        CHECK (ph > 0 AND ph <= 14),
+
+    paco2 NUMERIC(8,3) NOT NULL
+        CHECK (paco2 > 0),
+
+    hco3 NUMERIC(8,3) NOT NULL
+        CHECK (hco3 > 0),
+
+    pao2 NUMERIC(8,3)
+        CHECK (pao2 IS NULL OR pao2 > 0),
+
+    sodium NUMERIC(8,3)
+        CHECK (sodium IS NULL OR sodium > 0),
+
+    chloride NUMERIC(8,3)
+        CHECK (chloride IS NULL OR chloride > 0),
+
+    albumin NUMERIC(8,3)
+        CHECK (albumin IS NULL OR albumin > 0),
+
+    input_units JSONB NOT NULL DEFAULT '{}'::JSONB,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+
+
+
+CREATE INDEX idx_abg_reports_user_created
+ON abg.abg_reports (user_id, created_at DESC);
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREATE TABLE abg.abg_analysis_results (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    report_id BIGINT NOT NULL
+        REFERENCES abg.abg_reports(id)
+        ON DELETE CASCADE,
+
+    primary_assessment JSONB NOT NULL DEFAULT '{}'::JSONB,
+
+    compensation_result JSONB NOT NULL DEFAULT '{}'::JSONB,
+
+    anion_gap NUMERIC(10,3),
+
+    warnings JSONB NOT NULL DEFAULT '[]'::JSONB,
+
+    result_payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+
+    algorithm_version VARCHAR(50) NOT NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+
+CREATE INDEX idx_abg_results_report
+ON abg.abg_analysis_results (report_id);
+
+
+
+
+
+CREATE TABLE abg.calculation_configurations (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    version VARCHAR(50) NOT NULL UNIQUE,
+
+    description TEXT,
+
+    rules JSONB NOT NULL DEFAULT '{}'::JSONB,
+
+    effective_from TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+
+
+abg_analyzer_db
+│
+└── abg
+    │
+    ├── users
+    │     │
+    │     └── abg_reports
+    │              │
+    │              └── abg_analysis_results
+    │
+    └── calculation_configurations
