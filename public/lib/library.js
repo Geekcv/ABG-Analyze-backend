@@ -16,7 +16,6 @@ const {
   sendAdminRegistrationEmail,
 } = require("./email/email.js");
 
-
 const JWT_SECRET = process.env.JWT_SECRET;
 
 module.exports = function () {
@@ -34,11 +33,12 @@ let common_fn = {
 
   res_user: registerUser,
   lo_ap_us: loginUser,
-  fetch_user:getAllUsers
+  fetch_user: getAllUsers,
+  cr_pat: createPatient,
+  fetch_pat:getAllPatients
 };
 
 const schema = "abg";
-
 
 async function registerUser(req, res) {
   try {
@@ -92,7 +92,7 @@ async function registerUser(req, res) {
     const checkEmail = await queries.custom_query(
       `SELECT id FROM ${tablename}
        WHERE LOWER(email) = LOWER('${safeEmail}')
-       LIMIT 1`
+       LIMIT 1`,
     );
 
     if (checkEmail && checkEmail.length > 0) {
@@ -116,7 +116,7 @@ async function registerUser(req, res) {
          '${safePassword}',
          'USER'
        )
-       RETURNING id, row_id, name, email, role, cr_on`
+       RETURNING id, row_id, name, email, role, cr_on`,
     );
 
     const savedUser = result && result[0];
@@ -171,7 +171,6 @@ async function registerUser(req, res) {
       msg: "Registration successful",
       data: savedUser,
     });
-
   } catch (error) {
     console.error("registerUser error:", error.message);
 
@@ -263,8 +262,6 @@ async function loginUser(req, res) {
   }
 }
 
-
-
 async function getAllUsers(req, res) {
   try {
     const tablename = schema + ".users";
@@ -281,17 +278,16 @@ async function getAllUsers(req, res) {
           up_on
        FROM ${tablename}
        WHERE role != 'ADMIN'
-       ORDER BY cr_on DESC`
+       ORDER BY cr_on DESC`,
     );
 
-    console.log("users",result)
+    console.log("users", result);
 
     return libFunc.sendResponse(res, {
       status: 0,
       msg: "Users fetched successfully",
       data: result || [],
     });
-
   } catch (error) {
     console.error("getAllUsers error:", error);
 
@@ -302,6 +298,155 @@ async function getAllUsers(req, res) {
   }
 }
 
+async function createPatient(req, res) {
+  try {
+    const {
+      name,
+      age,
+      gender,
+      ipdNo,
+      bedNo,
+      diagnosis,
+      oldHistory = "",
+    } = req.data || {};
+
+    console.log("req", req.data);
+
+    // Validate required fields
+    if (
+      !name?.trim() ||
+      age === undefined ||
+      age === null ||
+      age === "" ||
+      !gender ||
+      !ipdNo?.trim() ||
+      !bedNo?.trim() ||
+      !diagnosis?.trim()
+    ) {
+      return libFunc.sendResponse(res, {
+        stat: 1,
+        message: "Please provide all required patient details.",
+      });
+    }
+
+    const patientAge = Number(age);
+
+    if (!Number.isInteger(patientAge) || patientAge < 0 || patientAge > 120) {
+      libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Age must be a whole number between 0 and 120.",
+      });
+    }
+
+    if (!["Male", "Female", "Other"].includes(gender)) {
+      libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Invalid gender.",
+      });
+    }
+
+    const rowId = libFunc.randomid();
+
+    const sql = `
+      INSERT INTO abg.patients (
+        row_id,
+        name,
+        age,
+        gender,
+        ipd_no,
+        bed_no,
+        diagnosis,
+        old_history
+      )
+      VALUES (
+        '${rowId}',
+        '${name.trim()}',
+        '${patientAge}',
+        '${gender}',
+        '${ipdNo.trim()}',
+        '${bedNo.trim()}',
+        '${diagnosis.trim()}',
+        '${oldHistory}'
+      )
+      RETURNING
+        row_id,
+        name,
+        age,
+        gender,
+        ipd_no,
+        bed_no,
+        diagnosis,
+        old_history
+    `;
+
+    const result = await queries.custom_query(sql);
+
+    // Adjust this extraction if your custom_query helper returns
+    // a different result structure.
+    const patient = Array.isArray(result) ? result[0] : result?.[0];
+
+    console.log("p", patient);
+
+    if (!patient) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Patient could not be saved.",
+      });
+    }
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patient saved successfully.",
+      data: patient,
+    });
+  } catch (error) {
+    console.error("createPatient error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to save patient.",
+    });
+  }
+}
+
+async function getAllPatients(req, res) {
+  try {
+    const tablename = schema + ".patients";
+
+    const result = await queries.custom_query(
+      `SELECT
+          id,
+          row_id,
+          name,
+          age,
+          gender,
+          ipd_no,
+          bed_no,
+          diagnosis,
+          old_history,
+          created_by,
+          cr_on,
+          up_on
+       FROM ${tablename}
+       ORDER BY cr_on DESC`
+    );
+
+    console.log("patients", result);
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patients fetched successfully",
+      data: result || [],
+    });
+  } catch (error) {
+    console.error("getAllPatients error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to fetch patients",
+    });
+  }
+}
 
 async function getCurrentUser(req, res) {
   try {
