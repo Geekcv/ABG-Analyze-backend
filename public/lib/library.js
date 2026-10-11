@@ -130,40 +130,40 @@ async function registerUser(req, res) {
 
     // 4. Send both emails independently
     // Email failure must not fail registration
-    try {
-      const emailTasks = [
-        {
-          label: "Welcome email",
-          task: () =>
-            sendWelcomeEmail(savedUser.name, savedUser.email),
-        },
-        {
-          label: "Admin notification",
-          task: () =>
-            sendAdminRegistrationEmail(
-              savedUser.name,
-              savedUser.email
-            ),
-        },
-      ];
+    // try {
+    //   const emailTasks = [
+    //     {
+    //       label: "Welcome email",
+    //       task: () =>
+    //         sendWelcomeEmail(savedUser.name, savedUser.email),
+    //     },
+    //     {
+    //       label: "Admin notification",
+    //       task: () =>
+    //         sendAdminRegistrationEmail(
+    //           savedUser.name,
+    //           savedUser.email
+    //         ),
+    //     },
+    //   ];
 
-      await Promise.all(
-        emailTasks.map(async ({ label, task }) => {
-          try {
-            await task();
-            console.log(`${label} sent successfully`);
-          } catch (emailError) {
-            console.error(
-              `${label} failed:`,
-              emailError.message
-            );
-          }
-        })
-      );
-    } catch (emailError) {
-      // Extra protection: email issues won't fail registration
-      console.error("Email processing error:", emailError.message);
-    }
+    //   await Promise.all(
+    //     emailTasks.map(async ({ label, task }) => {
+    //       try {
+    //         await task();
+    //         console.log(`${label} sent successfully`);
+    //       } catch (emailError) {
+    //         console.error(
+    //           `${label} failed:`,
+    //           emailError.message
+    //         );
+    //       }
+    //     })
+    //   );
+    // } catch (emailError) {
+    //   // Extra protection: email issues won't fail registration
+    //   console.error("Email processing error:", emailError.message);
+    // }
 
     // 5. Registration success
     return libFunc.sendResponse(res, {
