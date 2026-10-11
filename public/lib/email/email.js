@@ -1,5 +1,9 @@
 const nodemailer = require("nodemailer");
 
+// ========================================
+// 1. EMAIL CONFIGURATION
+// ========================================
+
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -8,15 +12,40 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
-const FRONTEND_URL =
-  process.env.FRONTEND_URL || "http://localhost:4200";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:4200";
 
-/**
- * Send welcome email to registered user
- */
+// ========================================
+// 2. VERIFY SMTP CONNECTION
+// ========================================
+
+transporter
+  .verify()
+  .then(() => {
+    console.log("Gmail SMTP connection successful");
+  })
+  .catch((error) => {
+    console.error("Gmail SMTP connection failed:", {
+      code: error.code,
+      responseCode: error.responseCode,
+      message: error.message,
+    });
+  });
+
+// ========================================
+// 3. SEND WELCOME EMAIL TO USER
+// ========================================
+
 async function sendWelcomeEmail(name, email) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error("Email transporter configuration is missing");
+  }
+
+  if (!email) {
+    throw new Error("User email is missing");
+  }
+
   const safeName = escapeHtml(name || "User");
+  const safeEmail = escapeHtml(email);
 
   const mailOptions = {
     from: `"ABG Analyzer" <${process.env.EMAIL_USER}>`,
@@ -42,7 +71,9 @@ async function sendWelcomeEmail(name, email) {
 
           <tr>
             <td style="padding:30px;color:#26364b;">
-              <h2 style="color:#147f86;">Welcome, ${safeName}!</h2>
+              <h2 style="color:#147f86;">
+                Welcome, ${safeName}!
+              </h2>
 
               <p style="font-size:15px;line-height:1.8;">
                 Thank you for registering with ABG Analyzer.
@@ -54,12 +85,15 @@ async function sendWelcomeEmail(name, email) {
                 <p style="margin:0 0 10px;color:#147f86;font-weight:bold;">
                   Your account details
                 </p>
+
                 <p style="margin:7px 0;">
                   <strong>Name:</strong> ${safeName}
                 </p>
+
                 <p style="margin:7px 0;word-break:break-word;">
-                  <strong>Email:</strong> ${escapeHtml(email)}
+                  <strong>Email:</strong> ${safeEmail}
                 </p>
+
                 <p style="margin:7px 0;">
                   <strong>Account:</strong> Registered
                 </p>
@@ -103,23 +137,54 @@ async function sendWelcomeEmail(name, email) {
     `,
   };
 
-  return transporter.sendMail(mailOptions);
+  try {
+    const info = await transporter.sendMail(mailOptions);
+
+    console.log("Welcome email sent successfully:", {
+      messageId: info.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected,
+    });
+
+    return info;
+  } catch (error) {
+    console.error("Welcome email failed:", {
+      code: error.code,
+      responseCode: error.responseCode,
+      message: error.message,
+    });
+
+    throw error;
+  }
 }
 
-/**
- * Notify admin about a new registration
- */
+// ========================================
+// 4. SEND NEW REGISTRATION EMAIL TO ADMIN
+// ========================================
+
 async function sendAdminRegistrationEmail(name, email) {
-    console.log("data",name,email)
+  if (!process.env.ADMIN_EMAIL) {
+    throw new Error("ADMIN_EMAIL is not configured");
+  }
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error("Email transporter configuration is missing");
+  }
+
+  if (!email) {
+    throw new Error("Registered user email is missing");
+  }
+
   const safeName = escapeHtml(name || "User");
   const safeEmail = escapeHtml(email);
+
   const registeredAt = new Date().toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
   });
 
   const mailOptions = {
     from: `"ABG Analyzer Notifications" <${process.env.EMAIL_USER}>`,
-    to: ADMIN_EMAIL,
+    to: process.env.ADMIN_EMAIL,
     subject: "New User Registration - ABG Analyzer",
     html: `
       <div style="font-family:Arial,sans-serif;background:#f4f7fb;padding:25px;">
@@ -153,6 +218,7 @@ async function sendAdminRegistrationEmail(name, email) {
               <table width="100%" cellpadding="12" cellspacing="0"
                 style="border-collapse:collapse;margin:20px 0;
                 font-size:14px;">
+
                 <tr style="background:#f5f8fc;">
                   <td style="border:1px solid #e2e8f0;">
                     <strong>User Name</strong>
@@ -161,6 +227,7 @@ async function sendAdminRegistrationEmail(name, email) {
                     ${safeName}
                   </td>
                 </tr>
+
                 <tr>
                   <td style="border:1px solid #e2e8f0;">
                     <strong>Email</strong>
@@ -169,6 +236,7 @@ async function sendAdminRegistrationEmail(name, email) {
                     ${safeEmail}
                   </td>
                 </tr>
+
                 <tr style="background:#f5f8fc;">
                   <td style="border:1px solid #e2e8f0;">
                     <strong>Role</strong>
@@ -177,6 +245,7 @@ async function sendAdminRegistrationEmail(name, email) {
                     USER
                   </td>
                 </tr>
+
                 <tr>
                   <td style="border:1px solid #e2e8f0;">
                     <strong>Registration Time</strong>
@@ -214,12 +283,31 @@ async function sendAdminRegistrationEmail(name, email) {
     `,
   };
 
-  return transporter.sendMail(mailOptions);
+  try {
+    const info = await transporter.sendMail(mailOptions);
+
+    console.log("Admin email sent successfully:", {
+      messageId: info.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected,
+    });
+
+    return info;
+  } catch (error) {
+    console.error("Admin notification email failed:", {
+      code: error.code,
+      responseCode: error.responseCode,
+      message: error.message,
+    });
+
+    throw error;
+  }
 }
 
-/**
- * Escape dynamic text before inserting it into HTML
- */
+// ========================================
+// 5. ESCAPE HTML VALUES
+// ========================================
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => {
     const entities = {
@@ -233,6 +321,10 @@ function escapeHtml(value) {
     return entities[char];
   });
 }
+
+// ========================================
+// 6. EXPORT FUNCTIONS
+// ========================================
 
 module.exports = {
   sendWelcomeEmail,
