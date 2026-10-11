@@ -39,21 +39,7 @@ function verifyToken(req, res, next) {
     }
   });
 }
-const ACUBE_WEBHOOK_SECRET = "Ip!@zvHbhrAGadjco";
-router.post("/acube-24", async function (req, res) {
-  console.log("Acube WEbhook");
-  // console.log(req);
-  console.log(req.body);
-  if (req.body.type == "message_api_clicked") {
-    var messageTemplateData = JSON.parse(req.body.data.message.message);
-    var customerMobile = req.body.data.customer.phone_number;
-    await common_fn.markAsDone(messageTemplateData, customerMobile, res);
-  } else {
-    res.status(200).json({
-      message: "Done",
-    });
-  }
-});
+
 
 router.post("/", verifyToken, function (req, res, next) {
   try {

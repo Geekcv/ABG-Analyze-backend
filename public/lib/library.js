@@ -27,6 +27,7 @@ let common_fn = {
 
   res_user: registerUser,
   lo_ap_us: loginUser,
+  fetch_user:getAllUsers
 };
 
 const schema = "abg";
@@ -168,6 +169,46 @@ async function loginUser(req, res) {
     });
   }
 }
+
+
+
+async function getAllUsers(req, res) {
+  try {
+    const tablename = schema + ".users";
+
+    const result = await queries.custom_query(
+      `SELECT
+          id,
+          row_id,
+          name,
+          email,
+          role,
+          is_active,
+          cr_on,
+          up_on
+       FROM ${tablename}
+       WHERE role != 'ADMIN'
+       ORDER BY cr_on DESC`
+    );
+
+    console.log("users",result)
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Users fetched successfully",
+      data: result || [],
+    });
+
+  } catch (error) {
+    console.error("getAllUsers error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to fetch users",
+    });
+  }
+}
+
 
 async function getCurrentUser(req, res) {
   try {
