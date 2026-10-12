@@ -35,7 +35,8 @@ let common_fn = {
   lo_ap_us: loginUser,
   fetch_user: getAllUsers,
   cr_pat: createPatient,
-  fetch_pat:getAllPatients
+  fetch_pat: getAllPatients,
+  del_pat: deletePatient,
 };
 
 const schema = "abg";
@@ -308,6 +309,8 @@ async function createPatient(req, res) {
       bedNo,
       diagnosis,
       oldHistory = "",
+      admittedAt,
+      dischargedAt = null,
     } = req.data || {};
 
     console.log("req", req.data);
@@ -324,28 +327,62 @@ async function createPatient(req, res) {
       !diagnosis?.trim()
     ) {
       return libFunc.sendResponse(res, {
-        stat: 1,
-        message: "Please provide all required patient details.",
+        status: 1,
+        msg: "Please provide all required patient details.",
       });
     }
 
     const patientAge = Number(age);
 
     if (!Number.isInteger(patientAge) || patientAge < 0 || patientAge > 120) {
-      libFunc.sendResponse(res, {
+      return libFunc.sendResponse(res, {
         status: 1,
         msg: "Age must be a whole number between 0 and 120.",
       });
     }
 
     if (!["Male", "Female", "Other"].includes(gender)) {
-      libFunc.sendResponse(res, {
+      return libFunc.sendResponse(res, {
         status: 1,
         msg: "Invalid gender.",
       });
     }
 
+    const admissionDate = admittedAt ? new Date(admittedAt) : new Date();
+
+    if (Number.isNaN(admissionDate.getTime())) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Invalid admission date and time.",
+      });
+    }
+
+    let dischargeDate = null;
+
+    if (dischargedAt) {
+      dischargeDate = new Date(dischargedAt);
+
+      if (Number.isNaN(dischargeDate.getTime())) {
+        return libFunc.sendResponse(res, {
+          status: 1,
+          msg: "Invalid discharge date and time.",
+        });
+      }
+
+      if (dischargeDate < admissionDate) {
+        return libFunc.sendResponse(res, {
+          status: 1,
+          msg: "Discharge cannot be earlier than admission.",
+        });
+      }
+    }
+
     const rowId = libFunc.randomid();
+
+    const sqlValue = (value) =>
+      value === null || value === undefined
+        ? "NULL"
+        : `'${String(value).replace(/'/g, "''")}'`;
 
     const sql = `
       INSERT INTO abg.patients (
@@ -356,19 +393,28 @@ async function createPatient(req, res) {
         ipd_no,
         bed_no,
         diagnosis,
-        old_history
+        old_history,
+        admitted_at,
+        discharged_at
       )
       VALUES (
-        '${rowId}',
-        '${name.trim()}',
-        '${patientAge}',
-        '${gender}',
-        '${ipdNo.trim()}',
-        '${bedNo.trim()}',
-        '${diagnosis.trim()}',
-        '${oldHistory}'
+        ${sqlValue(rowId)},
+        ${sqlValue(name.trim())},
+        ${patientAge},
+        ${sqlValue(gender)},
+        ${sqlValue(ipdNo.trim())},
+        ${sqlValue(bedNo.trim())},
+        ${sqlValue(diagnosis.trim())},
+        ${sqlValue(oldHistory)},
+        ${sqlValue(admissionDate.toISOString())}::timestamptz,
+        ${
+          dischargeDate
+            ? `${sqlValue(dischargeDate.toISOString())}::timestamptz`
+            : "NULL"
+        }
       )
       RETURNING
+        id,
         row_id,
         name,
         age,
@@ -376,16 +422,17 @@ async function createPatient(req, res) {
         ipd_no,
         bed_no,
         diagnosis,
-        old_history
+        old_history,
+        admitted_at,
+        discharged_at;
     `;
 
     const result = await queries.custom_query(sql);
+    const patient = Array.isArray(result)
+      ? result[0]
+      : (result?.rows?.[0] ?? result?.[0]);
 
-    // Adjust this extraction if your custom_query helper returns
-    // a different result structure.
-    const patient = Array.isArray(result) ? result[0] : result?.[0];
-
-    console.log("p", patient);
+    console.log("patient", patient);
 
     if (!patient) {
       return libFunc.sendResponse(res, {
@@ -426,12 +473,14 @@ async function getAllPatients(req, res) {
           old_history,
           created_by,
           cr_on,
-          up_on
+          up_on,
+          admitted_at,
+  discharged_at
        FROM ${tablename}
-       ORDER BY cr_on DESC`
+       ORDER BY cr_on DESC`,
     );
 
-    console.log("patients", result);
+    // console.log("patients", result);
 
     return libFunc.sendResponse(res, {
       status: 0,
@@ -444,6 +493,66 @@ async function getAllPatients(req, res) {
     return libFunc.sendResponse(res, {
       status: 1,
       msg: "Failed to fetch patients",
+    });
+  }
+}
+
+async function deletePatient(req, res) {
+  console.log("req", req);
+  try {
+    const { id, row_id } = req.data || {};
+
+    if (!id && !row_id) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Patient ID is required.",
+      });
+    }
+
+    const tablename = schema + ".patients";
+
+    const sqlValue = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
+    const condition = id
+      ? `id = ${Number(id)}`
+      : `row_id = ${sqlValue(row_id)}`;
+
+    if (id && (!Number.isInteger(Number(id)) || Number(id) <= 0)) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Invalid patient ID.",
+      });
+    }
+
+    const sql = `
+      DELETE FROM ${tablename}
+      WHERE ${condition}
+      RETURNING id, row_id;
+    `;
+
+    const result = await queries.custom_query(sql);
+    const deletedPatient = Array.isArray(result)
+      ? result[0]
+      : (result?.rows?.[0] ?? result?.[0]);
+
+    if (!deletedPatient) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Patient not found.",
+      });
+    }
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patient deleted successfully.",
+      data: deletedPatient,
+    });
+  } catch (error) {
+    console.error("deletePatient error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to delete patient.",
     });
   }
 }
