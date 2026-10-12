@@ -39,7 +39,9 @@ let common_fn = {
   fetch_pat: getAllPatients,
   del_pat: deletePatient,
   add_patient_sugar: addPatientSugar,
-  fetch_patient_sugar_history:getPatientSugarHistory
+  fetch_patient_sugar_history:getPatientSugarHistory,
+  fetch_patient_current_sugar: getAllPatientCurrentSugar,
+update_patient_sugar: updatePatientSugar
 };
 
 const schema = "abg";
@@ -708,6 +710,160 @@ async function getPatientSugarHistory(req, res) {
     });
   }
 }
+
+
+async function updatePatientSugar(req, res) {
+  try {
+    const {
+      patient_id,
+      sugar,
+      treatments = ""
+    } = req.data || {};
+
+    const patientId = Number(patient_id);
+    const sugarValue = Number(sugar);
+
+    if (
+      !Number.isInteger(patientId) ||
+      patientId <= 0 ||
+      sugar === null ||
+      sugar === undefined ||
+      sugar === "" ||
+      !Number.isFinite(sugarValue) ||
+      sugarValue <= 0 ||
+      sugarValue > 2000
+    ) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Valid patient ID and sugar value are required."
+      });
+    }
+
+    const sqlValue = (value) =>
+      value === null || value === undefined
+        ? "NULL"
+        : `'${String(value).replace(/'/g, "''")}'`;
+
+    const rowId = libFunc.randomid();
+
+    const sql = `
+      WITH updated AS (
+        UPDATE abg.patient_sugar
+        SET
+          sugar = ${sugarValue},
+          treatments = ${sqlValue(treatments)},
+          up_on = CURRENT_TIMESTAMP
+        WHERE id = (
+          SELECT id
+          FROM abg.patient_sugar
+          WHERE patient_id = ${patientId}
+          ORDER BY cr_on DESC, id DESC
+          LIMIT 1
+        )
+        RETURNING id, row_id, patient_id, sugar, treatments, cr_on, up_on
+      ),
+      inserted AS (
+        INSERT INTO abg.patient_sugar (
+          row_id,
+          patient_id,
+          sugar,
+          treatments
+        )
+        SELECT
+          ${sqlValue(rowId)},
+          p.id,
+          ${sugarValue},
+          ${sqlValue(treatments)}
+        FROM abg.patients p
+        WHERE p.id = ${patientId}
+          AND NOT EXISTS (SELECT 1 FROM updated)
+        RETURNING id, row_id, patient_id, sugar, treatments, cr_on, up_on
+      )
+      SELECT * FROM updated
+      UNION ALL
+      SELECT * FROM inserted;
+    `;
+
+    const result = await queries.custom_query(sql);
+    const record = Array.isArray(result)
+      ? result[0]
+      : result?.rows?.[0] ?? result?.[0];
+
+    if (!record) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Patient not found."
+      });
+    }
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patient sugar and treatment updated successfully.",
+      data: record
+    });
+  } catch (error) {
+    console.error("updatePatientSugar error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to update patient sugar."
+    });
+  }
+}
+
+
+
+async function getAllPatientCurrentSugar(req, res) {
+  try {
+    const sql = `
+      SELECT
+        p.id AS patient_id,
+        p.name,
+        p.age,
+        p.gender,
+        p.bed_no,
+        s.id AS sugar_record_id,
+        s.sugar,
+        s.treatments,
+        s.cr_on,
+        s.up_on
+      FROM abg.patients p
+      LEFT JOIN LATERAL (
+        SELECT
+          id,
+          sugar,
+          treatments,
+          cr_on,
+          up_on
+        FROM abg.patient_sugar
+        WHERE patient_id = p.id
+        ORDER BY cr_on DESC, id DESC
+        LIMIT 1
+      ) s ON TRUE
+      ORDER BY p.name ASC;
+    `;
+
+    const result = await queries.custom_query(sql);
+    const patients = Array.isArray(result)
+      ? result
+      : result?.rows ?? [];
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patient sugar data fetched successfully.",
+      data: patients
+    });
+  } catch (error) {
+    console.error("getAllPatientCurrentSugar error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to fetch patient sugar data."
+    });
+  }
+}
+
+
 
 async function getCurrentUser(req, res) {
   try {
