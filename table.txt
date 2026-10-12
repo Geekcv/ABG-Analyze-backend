@@ -178,3 +178,21 @@ CREATE INDEX IF NOT EXISTS idx_patients_name
 
 CREATE INDEX IF NOT EXISTS idx_patients_created_by
     ON abg.patients (created_by);
+
+
+
+CREATE TABLE IF NOT EXISTS abg.patient_sugar (
+id BIGSERIAL PRIMARY KEY,
+
+    row_id VARCHAR(50) UNIQUE NOT NULL,
+    patient_id BIGINT NOT NULL
+        REFERENCES abg.patients(id) ON DELETE CASCADE,
+    sugar NUMERIC(6,2) NOT NULL CHECK (sugar > 0 AND sugar <= 2000),
+    treatments TEXT,
+cr_on TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    up_on TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_patient_sugar_patient_id
+ON abg.patient_sugar(patient_id);

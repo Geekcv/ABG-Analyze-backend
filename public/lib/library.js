@@ -15,6 +15,7 @@ const {
   sendWelcomeEmail,
   sendAdminRegistrationEmail,
 } = require("./email/email.js");
+const { lutimes } = require("fs");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -37,6 +38,8 @@ let common_fn = {
   cr_pat: createPatient,
   fetch_pat: getAllPatients,
   del_pat: deletePatient,
+  add_patient_sugar: addPatientSugar,
+  fetch_patient_sugar_history:getPatientSugarHistory
 };
 
 const schema = "abg";
@@ -553,6 +556,155 @@ async function deletePatient(req, res) {
     return libFunc.sendResponse(res, {
       status: 1,
       msg: "Failed to delete patient.",
+    });
+  }
+}
+
+async function addPatientSugar(req, res) {
+  try {
+    const { patient_id, sugar, treatments = "" } = req.data || {};
+
+    const patientId = Number(patient_id);
+    const sugarValue = Number(sugar);
+
+    if (
+      !Number.isInteger(patientId) ||
+      patientId <= 0 ||
+      sugar === null ||
+      sugar === undefined ||
+      sugar === "" ||
+      !Number.isFinite(sugarValue) ||
+      sugarValue <= 0 ||
+      sugarValue > 2000
+    ) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Valid patient ID and sugar value are required.",
+      });
+    }
+
+    const sqlValue = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
+    const row_id = libFunc.randomid();
+
+    const sql = `
+      INSERT INTO abg.patient_sugar
+        (row_id,patient_id, sugar, treatments)
+      SELECT
+      '${row_id}',
+        p.id,
+        '${sugarValue}',
+        '${sqlValue(treatments)}'
+      FROM abg.patients p
+      WHERE p.id = '${patientId}'
+      RETURNING id,row_id, patient_id, sugar, treatments, cr_on;
+    `;
+
+    const result = await queries.custom_query(sql);
+
+    const record = Array.isArray(result)
+      ? result[0]
+      : (result?.rows?.[0] ?? result?.[0]);
+
+    if (!record) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Patient not found.",
+      });
+    }
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patient sugar saved successfully.",
+      data: record,
+    });
+  } catch (error) {
+    console.error("addPatientSugar error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to save patient sugar.",
+    });
+  }
+}
+
+
+async function getPatientSugarHistory(req, res) {
+  try {
+    const { patient_id } = req.data || {};
+    const patientId = Number(patient_id);
+
+    if (!Number.isInteger(patientId) || patientId <= 0) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Valid patient ID is required."
+      });
+    }
+
+    const patientTable = schema + ".patients";
+    const sugarTable = schema + ".patient_sugar";
+
+    const patientResult = await queries.custom_query(`
+      SELECT
+        id,
+        row_id,
+        name,
+        age,
+        gender,
+        ipd_no,
+        bed_no,
+        diagnosis,
+        old_history,
+        admitted_at,
+        discharged_at
+      FROM ${patientTable}
+      WHERE id = ${patientId}
+      LIMIT 1;
+    `);
+
+    const patient = Array.isArray(patientResult)
+      ? patientResult[0]
+      : patientResult?.rows?.[0] ?? patientResult?.[0];
+
+    if (!patient) {
+      return libFunc.sendResponse(res, {
+        status: 1,
+        msg: "Patient not found."
+      });
+    }
+
+    const sugarResult = await queries.custom_query(`
+      SELECT
+        id,
+        row_id,
+        patient_id,
+        sugar,
+        treatments,
+        cr_on,
+        up_on
+      FROM ${sugarTable}
+      WHERE patient_id = ${patientId}
+      ORDER BY cr_on DESC, id DESC;
+    `);
+
+    const sugarRecords = Array.isArray(sugarResult)
+      ? sugarResult
+      : sugarResult?.rows ?? [];
+
+    return libFunc.sendResponse(res, {
+      status: 0,
+      msg: "Patient sugar history fetched successfully.",
+      data: {
+        patient,
+        sugarRecords
+      }
+    });
+  } catch (error) {
+    console.error("getPatientSugarHistory error:", error);
+
+    return libFunc.sendResponse(res, {
+      status: 1,
+      msg: "Failed to fetch patient sugar history."
     });
   }
 }
