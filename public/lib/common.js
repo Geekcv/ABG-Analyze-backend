@@ -5,6 +5,8 @@ const libFunc = require("./functions.js");
 const path = require("path");
 var atob = require("atob");
 const multer = require("multer");
+const queries = require("./connect_db/queries.js");
+
 var fs = require("fs");
 require("./library.js")();
 
@@ -19,27 +21,92 @@ function decodeReqData(data) {
   return JSON.parse(decodeURIComponent(atob(data)));
 }
 
-function verifyToken(req, res, next) {
-  const token = req.headers.authorization.split(" ")[1];
-  const secret = JWT_SECRET;
+const schema = "abg";
 
-  jwt.verify(token, secret, function (err, decoded) {
+function sendTokenError(res, msg) {
+  const errorResponse = { msg, status: 2 };
+
+  return res
+    .status(401)
+    .send(Buffer.from(JSON.stringify(errorResponse)).toString("base64"));
+}
+
+async function verifyToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  // 1. Check authorization header
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return sendTokenError(res, "Please login again");
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!JWT_SECRET) {
+    console.error("JWT_SECRET is not configured");
+    return res.status(500).send({
+      status: 1,
+      msg: "Authentication configuration error",
+    });
+  }
+
+  // 2. Verify JWT
+  jwt.verify(token, JWT_SECRET, async function (err, decoded) {
     if (err) {
-      var errr = { msg: "Invalid Token", status: 2 };
-      var enErr = btoa(JSON.stringify(errr));
-      res.send(enErr);
-    } else {
-      req.userId = decoded.userId;
-      req.role = decoded.role;
+      return sendTokenError(res, "Invalid or expired token");
+    }
+
+    try {
+      // 3. Fetch current account status from database
+      const userTable = `${schema}.users`;
+
+      const result = await queries.custom_query(
+        `SELECT row_id, role, is_active, deleted_at
+         FROM ${userTable}
+         WHERE row_id = '${decoded.userId}'
+         LIMIT 1`,
+      );
+
+      const user = result && result[0];
+
+      // 4. Block missing, inactive, and deleted accounts
+      if (!user) {
+        return sendTokenError(res, "User account not found");
+      }
+
+      if (user.deleted_at != null) {
+        return sendTokenError(
+          res,
+          "Your account has been deleted. Please contact admin.",
+        );
+      }
+
+      if (user.is_active !== true) {
+        return sendTokenError(
+          res,
+          "Your account is inactive. Please contact admin.",
+        );
+      }
+
+      // 5. Set trusted values from the database/JWT
+      req.userId = user.row_id;
+      req.role = user.role;
       req.counterId = decoded.counterId;
       req.shopId = decoded.shopId;
       req.supplierId = decoded.supplierId;
       req.token = token;
-      next();
+
+      // 6. Continue to the protected API
+      return next();
+    } catch (error) {
+      console.error("verifyToken database error:", error);
+
+      return res.status(500).send({
+        status: 1,
+        msg: "Unable to verify account status",
+      });
     }
   });
 }
-
 
 router.post("/", verifyToken, function (req, res, next) {
   try {
@@ -49,9 +116,6 @@ router.post("/", verifyToken, function (req, res, next) {
     data.data.userId = req.userId;
     data.data.user_role = req.role;
     data.data.token = req.token;
-    data.data.counterId = req.counterId;
-    data.data.shopId = req.shopId;
-    data.data.supplierId = req.supplierId;
 
     const se = data.se;
 
@@ -97,8 +161,6 @@ router.post("/create-user", function (req, res, next) {
     });
   }
 });
-
-
 
 //==========================================================================================//
 
